@@ -1,34 +1,43 @@
+import * as dotenv from 'dotenv';
 import { ChatOpenAI } from "langchain/chat_models";
 import { HumanChatMessage, SystemChatMessage } from "langchain/schema";
 import { PuppeteerWebBaseLoader } from "langchain/document_loaders";
-import { CharacterTextSplitter } from "langchain/text_splitter";
+import { CharacterTextSplitter, RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { OpenAIEmbeddings, CohereEmbeddings } from "langchain/embeddings";
 import { Chroma } from "langchain/vectorstores";
 import { VectorDBQAChain } from "langchain/chains";
+import readLinePromises from 'readline/promises'
 
-async function train_model() {
-  const loader = new PuppeteerWebBaseLoader("https://mx.wovn.io/casestudy");
+try {
+  dotenv.config();
+} catch (e) {
+  console.error(e);
+}
+
+
+async function train_model(url: string, collectionName: string) {
+  const loader = new PuppeteerWebBaseLoader(url);
   const docs = await loader.load();
-  const textSplitter = new CharacterTextSplitter({
-    separator: "<div>",
-    chunkSize: 100,
+  const textSplitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 300,
     chunkOverlap: 2,
   });
   const output = await textSplitter.splitDocuments(docs);
-  const embeddings = new CohereEmbeddings();
+  console.log(output)
+  const embeddings = new OpenAIEmbeddings();
 
   try {
     const vectorStore = await Chroma.fromDocuments(output, embeddings, {
-      collectionName: "mx.wovn.io",
+      collectionName: collectionName,
     });
     const response = await vectorStore.similaritySearch("WOVN");
-    console.log(response);
+    console.log('success!')
   } catch (e) {
     console.error(e);
   }
 }
 
-async function chatbot() {
+async function chatbot(msg: string) {
   const chat = new ChatOpenAI({ temperature: 0.9 });
   const vectorStore = await Chroma.fromExistingCollection(
     new OpenAIEmbeddings(),
@@ -39,35 +48,46 @@ async function chatbot() {
 
   const chain = VectorDBQAChain.fromLLM(chat, vectorStore);
   const response = await chain.call({
-    query: "WOVN.io の最近のニュースは？",
+    query: msg
   });
-  console.log(response);
+  console.log(response.text);
 }
 
 async function main() {
-  const chat = new ChatOpenAI({ temperature: 0.9 });
-  const response = await chat.call([
-    new SystemChatMessage(
-      "You are an ironically machine translation bot that translates English to Japanese "
-    ),
-    new HumanChatMessage("I love programming."),
-  ]);
-  console.log(response);
-  // const template = "What is a good name for a company that makes {product}?";
-  // const prompt = new PromptTemplate({
-  //   template: template,
-  //   inputVariables: ["product"],
-  // });
+  const question = `
+  1. Train a model
+  2. ChatBot
+  Choose menu:`
+  const rl = readLinePromises.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  })
 
-  // const chain = new LLMChain({ llm: chat, prompt: prompt });
-  // const res = await chain.call({
-  //   product: "multilingual translation platform",
-  // });
-  // console.log(res);
+  while (true) {
+    const answer = await rl.question(question)
+    if (answer == "1") {
+      const url = await rl.question("URL: ")
+      const collectionName = await rl.question("Collection Name: ")
+      await train_model(url, collectionName)
+    } else if (answer == "2") {
+      console.log("Hello! How can I help you today?")
+
+      while (true) {
+        const msg = await rl.question("Message: ")
+        if (msg === "end") {
+          break;
+        }
+        console.log('thinking....')
+        await chatbot(msg)
+      }
+    } else {
+      break
+    }
+  }
+
+  rl.close();
+  process.exit(0)
 }
 
-// main();
+main();
 
-// train_model();
-
-chatbot();
